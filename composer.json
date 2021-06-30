@@ -1,6 +1,6 @@
 {
-    "name": "centrifugal/phpcent",
-    "description":"PHP library to communicate with Centrifugo HTTP API",
+    "name": "teamones/phpcent",
+    "description":"PHP library to communicate with Centrifugo HTTP API（use workerman support async request）",
     "keywords": ["centrifugo", "websocket", "realtime", "messaging"],
     "homepage": "https://github.com/centrifugal/phpcent",
     "version": "3.1.1",
