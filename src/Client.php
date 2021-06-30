@@ -1,4 +1,8 @@
-<?php namespace phpcent;
+<?php
+
+namespace phpcent;
+
+use Workerman\Http\Client as WorkermanHttpClient;
 
 /**
  * Centrifugo API Client
@@ -23,6 +27,8 @@ class Client
     private $safety = true;
     private $useAssoc = false;
 
+    private $workermanHttpClient = null;
+
     /**
      * Construct new Client instance.
      *
@@ -36,6 +42,7 @@ class Client
         $this->url = $url;
         $this->apikey = $apikey;
         $this->secret = $secret;
+        $this->workermanHttpClient = new WorkermanHttpClient;
     }
 
     /**
@@ -342,30 +349,44 @@ class Client
         return implode('.', $segments);
     }
 
-/*
- * Function added for backward compatibility with PHP version < 5.5
- */
+    /*
+     * Function added for backward compatibility with PHP version < 5.5
+     */
 
     public function _json_last_error_msg() {
-      if (function_exists('json_last_error_msg')) {
-        return json_last_error_msg();
-      }
-      static $ERRORS = array(
-        JSON_ERROR_NONE => 'No error',
-        JSON_ERROR_DEPTH => 'Maximum stack depth exceeded',
-        JSON_ERROR_STATE_MISMATCH => 'State mismatch (invalid or malformed JSON)',
-        JSON_ERROR_CTRL_CHAR => 'Control character error, possibly incorrectly encoded',
-        JSON_ERROR_SYNTAX => 'Syntax error',
-        JSON_ERROR_UTF8 => 'Malformed UTF-8 characters, possibly incorrectly encoded'
-      );
+        if (function_exists('json_last_error_msg')) {
+            return json_last_error_msg();
+        }
+        static $ERRORS = array(
+            JSON_ERROR_NONE => 'No error',
+            JSON_ERROR_DEPTH => 'Maximum stack depth exceeded',
+            JSON_ERROR_STATE_MISMATCH => 'State mismatch (invalid or malformed JSON)',
+            JSON_ERROR_CTRL_CHAR => 'Control character error, possibly incorrectly encoded',
+            JSON_ERROR_SYNTAX => 'Syntax error',
+            JSON_ERROR_UTF8 => 'Malformed UTF-8 characters, possibly incorrectly encoded'
+        );
 
-      $error = json_last_error();
-      return isset($ERRORS[$error]) ? $ERRORS[$error] : 'Unknown error';
-  }
+        $error = json_last_error();
+        return isset($ERRORS[$error]) ? $ERRORS[$error] : 'Unknown error';
+    }
 
-  private function send($method, $params = array())
+    /**
+     * @param $method
+     * @param array $params
+     * @param string $type
+     * @return mixed
+     * @throws \Exception
+     */
+    private function send($method, $params = array(), $type = "async")
     {
-        $response = \json_decode($this->request($method, $params), $this->useAssoc);
+        if($type === "async"){
+            // async request
+            $response = $this->asyncRequest($method, $params);
+        }else{
+            // sync curl request
+            $response = \json_decode($this->request($method, $params), $this->useAssoc);
+        }
+
         if (JSON_ERROR_NONE !== json_last_error()) {
             throw new \Exception(
                 'json_decode error: ' . $this->_json_last_error_msg()
@@ -437,5 +458,45 @@ class Client
             'Content-Type: application/json',
             'Authorization: apikey ' . $this->apikey,
         );
+    }
+
+    /**
+     * Asynchronous request
+     * @param $method
+     * @param $params
+     * @return array
+     */
+    private function asyncRequest($method, $params)
+    {
+        $body =  ['method' => $method, 'params' => $params];
+
+        $headers = [];
+        foreach ($this->getHeaders() as $header){
+            $headerArr = explode(':', $header);
+            $headers[$headerArr[0]] = $headerArr[1];
+        }
+
+        $this->workermanHttpClient->request(
+            $this->url,
+            [
+                'method' => 'POST',
+                'version' => '1.1',
+                'headers' =>$headers,
+                'data' => json_encode($body),
+                'success' => function ($response) {
+                    return $response->getBody();
+                },
+                'error' => function ($exception) {
+                    throw new \Exception(
+                        "Response code: "
+                        . $exception->getCode()
+                        . PHP_EOL
+                        . "cURL error: " . $exception->getMessage() . PHP_EOL
+                    );
+                }
+            ]
+        );
+
+        return [];
     }
 }
