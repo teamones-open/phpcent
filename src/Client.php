@@ -28,6 +28,9 @@ class Client
     private $useAssoc = false;
 
     private $workermanHttpClient = null;
+    private $async = false;
+    private $onSuccess;
+    private $onError;
 
     /**
      * Construct new Client instance.
@@ -42,7 +45,18 @@ class Client
         $this->url = $url;
         $this->apikey = $apikey;
         $this->secret = $secret;
-        $this->workermanHttpClient = new WorkermanHttpClient;
+    }
+
+    /**
+     * Opt into callback-based Workerman requests. Synchronous mode is the default.
+     * Async requests return [] immediately; callbacks receive the decoded reply/error.
+     */
+    public function setAsync(bool $async, ?callable $onSuccess = null, ?callable $onError = null)
+    {
+        $this->async = $async;
+        $this->onSuccess = $onSuccess;
+        $this->onError = $onError;
+        return $this;
     }
 
     /**
@@ -370,29 +384,23 @@ class Client
         return isset($ERRORS[$error]) ? $ERRORS[$error] : 'Unknown error';
     }
 
-    /**
-     * @param $method
-     * @param array $params
-     * @param string $type
-     * @return mixed
-     * @throws \Exception
-     */
-    private function send($method, $params = array(), $type = "async")
+    private function send($method, $params = array())
     {
-        if($type === "async"){
-            // async request
-            $response = $this->asyncRequest($method, $params);
-        }else{
-            // sync curl request
-            $response = \json_decode($this->request($method, $params), $this->useAssoc);
+        if ($this->async) {
+            return $this->asyncRequest($method, $params);
         }
+        return $this->decodeResponse($this->request($method, $params));
+    }
 
-        if (JSON_ERROR_NONE !== json_last_error()) {
-            throw new \Exception(
-                'json_decode error: ' . $this->_json_last_error_msg()
-            );
-        }
-        return $response;
+    private function decodeResponse($body)
+    {
+        return json_decode($body, $this->useAssoc, 512, JSON_THROW_ON_ERROR);
+    }
+
+    private function encodeCommand($method, $params)
+    {
+        // Centrifugo 3 uses /api with a method/params envelope, not /api/<method>.
+        return json_encode(array('method' => $method, 'params' => (object)$params), JSON_THROW_ON_ERROR);
     }
 
     private function urlsafeB64Encode($input)
@@ -407,49 +415,49 @@ class Client
 
     private function request($method, $params)
     {
+        $body = $this->encodeCommand($method, $params);
         $ch = curl_init();
-        if ($this->connectTimeoutOption) {
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $this->connectTimeoutOption);
+        if ($ch === false) {
+            throw new \RuntimeException('Unable to initialize cURL');
         }
-        if ($this->timeoutOption) {
-            curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeoutOption);
-        }
-        if ($this->forceIpResolveV4) {
-            curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
-        }
-        if (!$this->safety) {
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        } elseif ($this->safety) {
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-            if ($this->cert) {
+        try {
+            if ($this->connectTimeoutOption !== null) {
+                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $this->connectTimeoutOption);
+            }
+            if ($this->timeoutOption !== null) {
+                curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeoutOption);
+            }
+            if ($this->forceIpResolveV4) {
+                curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+            }
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $this->safety);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $this->safety ? 2 : 0);
+            if ($this->safety && $this->cert) {
                 curl_setopt($ch, CURLOPT_CAINFO, $this->cert);
             }
-            if ($this->caPath) {
+            if ($this->safety && $this->caPath) {
                 curl_setopt($ch, CURLOPT_CAPATH, $this->caPath);
             }
+            curl_setopt($ch, CURLOPT_USERAGENT, 'teamones-phpcent/5');
+            curl_setopt($ch, CURLOPT_HEADER, 0);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $this->getHeaders());
+            curl_setopt($ch, CURLOPT_URL, $this->url);
+            $data = curl_exec($ch);
+            $error = curl_error($ch);
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($data === false || $status !== 200) {
+                throw new \RuntimeException('Centrifugo HTTP status: ' . $status . '; cURL error: ' . $error);
+            }
+            return $data;
+        } finally {
+            // PHP 8.5 releases CurlHandle automatically and deprecates curl_close().
+            if (PHP_VERSION_ID < 80500) {
+                curl_close($ch);
+            }
         }
-        curl_setopt($ch, CURLOPT_USERAGENT, 'curl/7.39.0');
-        curl_setopt($ch, CURLOPT_HEADER, 0);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(array('method' => $method, 'params' => $params)));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $this->getHeaders());
-        curl_setopt($ch, CURLOPT_URL, $this->url);
-        $data = curl_exec($ch);
-        $error = curl_error($ch);
-        $headers = curl_getinfo($ch);
-        curl_close($ch);
-        if (empty($headers["http_code"]) || ($headers["http_code"] != 200)) {
-            throw new \Exception(
-                "Response code: "
-                . $headers["http_code"]
-                . PHP_EOL
-                . "cURL error: " . $error . PHP_EOL
-            );
-        }
-        return $data;
     }
 
     private function getHeaders()
@@ -460,43 +468,53 @@ class Client
         );
     }
 
-    /**
-     * Asynchronous request
-     * @param $method
-     * @param $params
-     * @return array
-     */
     private function asyncRequest($method, $params)
     {
-        $body =  ['method' => $method, 'params' => $params];
-
-        $headers = [];
-        foreach ($this->getHeaders() as $header){
-            $headerArr = explode(':', $header);
-            $headers[$headerArr[0]] = $headerArr[1];
+        $body = $this->encodeCommand($method, $params);
+        if ($this->workermanHttpClient === null) {
+            $options = array();
+            if ($this->connectTimeoutOption !== null) $options['connect_timeout'] = $this->connectTimeoutOption;
+            if ($this->timeoutOption !== null) $options['timeout'] = $this->timeoutOption;
+            $ssl = array('verify_peer' => $this->safety, 'verify_peer_name' => $this->safety);
+            if ($this->cert) $ssl['cafile'] = $this->cert;
+            if ($this->caPath) $ssl['capath'] = $this->caPath;
+            $options['context'] = array('ssl' => $ssl);
+            $this->workermanHttpClient = new WorkermanHttpClient($options);
         }
-
-        $this->workermanHttpClient->request(
-            $this->url,
-            [
-                'method' => 'POST',
-                'version' => '1.1',
-                'headers' =>$headers,
-                'data' => json_encode($body),
-                'success' => function ($response) {
-                    return $response->getBody();
-                },
-                'error' => function ($exception) {
-                    throw new \Exception(
-                        "Response code: "
-                        . $exception->getCode()
-                        . PHP_EOL
-                        . "cURL error: " . $exception->getMessage() . PHP_EOL
-                    );
+        $headers = array();
+        foreach ($this->getHeaders() as $header) {
+            list($name, $value) = explode(':', $header, 2);
+            $headers[$name] = trim($value);
+        }
+        $success = $this->onSuccess;
+        $error = $this->onError;
+        $assoc = $this->useAssoc;
+        $handleError = static function (\Throwable $exception) use ($error) {
+            if ($error !== null) {
+                $error($exception);
+                return;
+            }
+            throw $exception;
+        };
+        $this->workermanHttpClient->request($this->url, array(
+            'method' => 'POST',
+            'version' => '1.1',
+            'headers' => $headers,
+            'data' => $body,
+            'success' => static function ($response) use ($success, $handleError, $assoc) {
+                try {
+                    if ($response->getStatusCode() !== 200) {
+                        throw new \RuntimeException('Centrifugo HTTP status: ' . $response->getStatusCode());
+                    }
+                    $reply = json_decode((string)$response->getBody(), $assoc, 512, JSON_THROW_ON_ERROR);
+                } catch (\Throwable $exception) {
+                    $handleError($exception);
+                    return;
                 }
-            ]
-        );
-
-        return [];
+                if ($success !== null) $success($reply);
+            },
+            'error' => $handleError,
+        ));
+        return array();
     }
 }

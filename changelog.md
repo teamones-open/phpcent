@@ -1,3 +1,11 @@
+# v5.0.0
+
+* Keep the phpcent namespace and Centrifugo 3.x method/params HTTP protocol.
+* Support PHP 8.5 and Workerman HTTP client 3.x / Workerman 5.
+* Make synchronous replies the default; retain asynchronous sending through setAsync(true, success, error).
+* Avoid deprecated curl_close on PHP 8.5; validate JSON and propagate HTTP/async errors.
+* Add loopback transport/JWT regression tests and PHP 8.1-8.5 CI.
+
 # v3.1.1
 
 * option to force IPv4 addresses when resolving hostnames, see [#44](https://github.com/centrifugal/phpcent/issues/44) and [#45](https://github.com/centrifugal/phpcent/pull/45). Thanks [Steve Therrien](https://github.com/SteveTherrien)!

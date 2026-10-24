@@ -1,138 +1,62 @@
-phpcent
-=======
+# teamones/phpcent
 
-[![Build Status](https://img.shields.io/travis/centrifugal/phpcent.svg?style=flat-square)](https://travis-ci.org/centrifugal/phpcent)
-[![Latest Version](https://img.shields.io/github/release/centrifugal/phpcent.svg?style=flat-square)](https://github.com/centrifugal/phpcent/releases)
+Centrifugo **3.x** HTTP API client for Teamones, with PHP 8.5 compatibility and optional Workerman 5 asynchronous requests. The PHP namespace remains **`phpcent`**.
 
-PHP library to communicate with Centrifugo v2 HTTP API.
+The Teamones package version is independent of upstream `centrifugal/phpcent`: **teamones/phpcent 5.x targets Centrifugo 3.x**, not the server version targeted by upstream phpcent 5.x/6.x.
 
-Library is published on the Composer: https://packagist.org/packages/centrifugal/phpcent
-
-```bash
-composer require centrifugal/phpcent:~3.0
+```sh
+composer remove centrifugal/phpcent --no-update
+composer require teamones/phpcent:^5.0
 ```
 
-See [Centrifugo documentation](https://centrifugal.github.io/centrifugo/)
+PHP >= 8.1 and cURL/JSON extensions are required. Workerman HTTP client 3.x is installed for asynchronous support. Both phpcent packages define the same namespace and must not be installed together.
 
-Basic Usage:
+## Synchronous API
 
 ```php
-$client = new \phpcent\Client("http://localhost:8000/api");
-$client->setApiKey("Centrifugo API key");
-$client->publish("channel", ["message" => "Hello World"]);
+$client = new \phpcent\Client($apiUrl, $apiKey, $jwtSecret);
+$client->setConnectTimeoutOption(2)->setTimeoutOption(5);
+$reply = $client->publish('channel', ['message' => 'Hello']);
+$reply = $client->broadcast(['one', 'two'], ['message' => 'Hello']);
+$token = $client->generateConnectionToken('user-id', time() + 300, [], ['channel']);
 ```
 
-You can use `phpcent` to create connection token (JWT):
+The endpoint must be the Centrifugo 3 API URL, for example `http://centrifugo:8000/api`. Requests use an `Authorization: apikey ...` header and a JSON `method` / `params` envelope. This package does not send the newer `/api/publish` protocol.
+
+HTTP and malformed JSON failures throw exceptions. Centrifugo application errors remain in the decoded `error` field, preserving the existing client response contract. Responses are objects by default; use `setUseAssoc(true)` for arrays.
+
+Existing `publish`, `broadcast`, `unsubscribe`, `disconnect`, `presence`, `presenceStats`, `history`, `historyRemove`, `channels`, `info`, connection JWT and private-channel JWT methods remain available. Legacy `presence_stats` / `history_remove` aliases are retained.
+
+## Workerman asynchronous requests
+
+Configure this inside a running Workerman 5 worker:
 
 ```php
-$token = $client->setSecret("Centrifugo secret key")->generateConnectionToken($userId);
+$client->setAsync(
+    true,
+    function ($reply) { /* inspect the decoded result/error */ },
+    function (\Throwable $error) { /* log or handle transport/JSON errors */ }
+);
+$client->publish('channel', ['message' => 'Hello']);
 ```
 
-Connection token that will be valid for 5 minutes:
+Async calls return `[]` immediately; decoded replies are delivered to the success callback. Non-200 HTTP status, malformed JSON and connection failures reach the error callback. Without an error callback, failures are thrown in the event loop. Use `setAsync(false)` to restore synchronous mode.
 
-```php
-$token = $client->setSecret("Centrifugo secret key")->generateConnectionToken($userId, time() + 5*60);
+Timeout and SSL options should be configured before the first asynchronous request. SSL verification is enabled by default; `setSafety(false)` explicitly disables it. `forceIpResolveV4()` applies to the synchronous cURL transport.
+
+## Upgrade from teamones/phpcent 4.1
+
+- **Synchronous requests are now the default**, matching upstream client return semantics. Existing fire-and-forget integrations must explicitly call `setAsync(true, ...)`.
+- PHP >= 8.1 and Workerman HTTP client >= 3.1 are required.
+- The Workerman HTTP client is created lazily; generating JWTs does not create an HTTP client or require a running event loop.
+- PHP 8.5 no longer calls deprecated `curl_close()`. Invalid JSON is handled at the request that produced it rather than through stale global JSON error state.
+- The package name remains `teamones/phpcent` and namespace remains `phpcent`.
+
+## Tests
+
+```sh
+composer install
+composer test
 ```
 
-It's also possible to generate private channel subscription token:
-
-```php
-$token = $client->setSecret("Centrifugo secret key")->generatePrivateChannelToken($client, $channel);
-```
-
-Also API key and secret can be set in constructor:
-
-```php
-$client = new \phpcent\Client("http://localhost:8000/api", "Centrifugo API key", "Centrifugo secret key");
-```
-
-Timeouts:
-
-```php
-$client->setConnectTimeoutOption(0); // Seconds | 0 = never
-$client->setTimeoutOption(2); // Seconds
-```
-
-All available API methods:
-
-```php
-$response = $client->publish($channel, $data);
-$response = $client->broadcast($channels, $data);
-$response = $client->unsubscribe($channel, $userId);
-$response = $client->disconnect($userId);
-$response = $client->presence($channel);
-$response = $client->presenceStats($channel);
-$response = $client->history($channel);
-$response = $client->historyRemove($channel);
-$response = $client->channels();
-$response = $client->info();
-```
-
-To use `assoc` option while decoding JSON in response:
-
-```php
-$client->setUseAssoc(true);
-```
-
-### SSL
-
-In case if your Centrifugo server has invalid SSL certificate, you can use:
-
-```php
-$client->setSafety(false);
-```
-
-You can also use self signed certificate in safe manner:
-
-```php
-$client = new \phpcent\Client("https://localhost:8000/api");
-$client->setCert("/path/to/certificate.pem");
-$client->setCAPath("/ca/path"); // if you need.
-```
-
-*Note:* Certificate must match with host name in `Client` address (`localhost` in example above).
-
-### DNS Resolution
-
-This error may indicate your system is having trouble resolving IPv6 addresses:
-
-```
-cURL error: Resolving timed out after [value] milliseconds
-```
-
-By default, both IPv4 and IPv6 addresses will attempt to be resolved. You can force it to only resolve IPv4 addresses with:
-
-```php
-$client->forceIpResolveV4();
-```
-
-### Testing
-
-Requirements:
-
-* git
-* A supported version of PHP
-* [composer](http://getcomposer.org/download)
-* [Docker](https://www.docker.com/products/docker-desktop)
-
-The provided PHPUnit tests assume that a local [Centrifugo](https://github.com/centrifugal/centrifugo) server is running and available at port 8000. This can be accomplished using Docker and the [official Centrifugo image](https://hub.docker.com/r/centrifugo/centrifugo/).
-
-```shell
-# Install package dependencies.
-$ composer install
-
-# The following command starts a Centrifugo server running in a background Docker container.
-$ docker run -d -p 8000:8000 --name centrifugo centrifugo/centrifugo centrifugo --api_insecure
-
-# Run the test suite.
-$ vendor/bin/phpunit
-
-# Shut down the Centrifugo container.
-$ docker stop centrifugo
-```
-
-Authors
-=======
-
-* [Dmitriy Soldatenko](https://github.com/sl4mmer)
-* [Dmitriy Tetekin](https://github.com/Tomchanskiy)
+The regression tests use loopback-only fixture servers for HTTP command framing, authorization, sync/async replies, errors and JWT signing. Transport fixtures need `pcntl` / `posix` and skip when unavailable. They do not need a Centrifugo instance or real credentials. CI runs PHP 8.1–8.5; local release validation also checks publish/broadcast against Centrifugo 3.1.1 on fresh test channels.
