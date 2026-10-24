@@ -472,6 +472,9 @@ class Client
     {
         $body = $this->encodeCommand($method, $params);
         if ($this->workermanHttpClient === null) {
+            if (!class_exists(WorkermanHttpClient::class)) {
+                throw new \LogicException('Async mode requires workerman/http-client ^3.1 and a running Workerman 5 worker');
+            }
             $options = array();
             if ($this->connectTimeoutOption !== null) $options['connect_timeout'] = $this->connectTimeoutOption;
             if ($this->timeoutOption !== null) $options['timeout'] = $this->timeoutOption;

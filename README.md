@@ -6,10 +6,12 @@ The Teamones package version is independent of upstream `centrifugal/phpcent`: *
 
 ```sh
 composer remove centrifugal/phpcent --no-update
-composer require teamones/phpcent:^5.0
+composer require teamones/phpcent:^5.0.1
 ```
 
-PHP >= 8.1 and cURL/JSON extensions are required. Workerman HTTP client 3.x is installed for asynchronous support. Both phpcent packages define the same namespace and must not be installed together.
+PHP >= 8.1 and cURL/JSON extensions are required. Synchronous requests and JWT generation have no Workerman dependency and can be used in existing Workerman 4 or 5 services. Both phpcent packages define the same namespace and must not be installed together.
+
+Use **5.0.1 or newer**: 5.0.0 required Workerman HTTP client 3.x unconditionally and cannot be installed alongside dependencies restricted to Workerman 4. Version 5.0.1 makes this transport optional.
 
 ## Synchronous API
 
@@ -29,6 +31,12 @@ Existing `publish`, `broadcast`, `unsubscribe`, `disconnect`, `presence`, `prese
 
 ## Workerman asynchronous requests
 
+For asynchronous requests, explicitly install the optional transport in a Workerman 5 project:
+
+```sh
+composer require workerman/http-client:^3.1
+```
+
 Configure this inside a running Workerman 5 worker:
 
 ```php
@@ -47,7 +55,7 @@ Timeout and SSL options should be configured before the first asynchronous reque
 ## Upgrade from teamones/phpcent 4.1
 
 - **Synchronous requests are now the default**, matching upstream client return semantics. Existing fire-and-forget integrations must explicitly call `setAsync(true, ...)`.
-- PHP >= 8.1 and Workerman HTTP client >= 3.1 are required.
+- PHP >= 8.1 is required. Workerman HTTP client >= 3.1 is only required when async mode is enabled; synchronous consumers do not need a worker upgrade.
 - The Workerman HTTP client is created lazily; generating JWTs does not create an HTTP client or require a running event loop.
 - PHP 8.5 no longer calls deprecated `curl_close()`. Invalid JSON is handled at the request that produced it rather than through stale global JSON error state.
 - The package name remains `teamones/phpcent` and namespace remains `phpcent`.

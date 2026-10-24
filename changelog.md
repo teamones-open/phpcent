@@ -1,3 +1,8 @@
+# v5.0.1
+
+* Make the Workerman 5 HTTP transport optional so synchronous clients remain installable in Workerman 4 services.
+* Report the missing optional async transport explicitly when async mode is used.
+
 # v5.0.0
 
 * Keep the phpcent namespace and Centrifugo 3.x method/params HTTP protocol.
