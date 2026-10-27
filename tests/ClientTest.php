@@ -88,6 +88,14 @@ final class ClientTest extends TestCase
         self::assertIsObject(json_decode($reply['result']['body'])->params);
     }
 
+    public function testEmptySuccessfulResponseKeepsOriginalReturnContract(): void
+    {
+        $objectClient = new Client($this->server('{}'));
+        self::assertInstanceOf(\stdClass::class, $objectClient->historyRemove('isolated'));
+        $arrayClient = (new Client($this->server('{}')))->setUseAssoc(true);
+        self::assertSame([], $arrayClient->historyRemove('isolated'));
+    }
+
     public function testApiErrorRemainsAvailable(): void
     {
         $client = new Client($this->server('{"error":{"code":102,"message":"unknown channel"}}'));

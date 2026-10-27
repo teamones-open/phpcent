@@ -68,3 +68,14 @@ composer test
 ```
 
 The regression tests use loopback-only fixture servers for HTTP command framing, authorization, sync/async replies, errors and JWT signing. Transport fixtures need `pcntl` / `posix` and skip when unavailable. They do not need a Centrifugo instance or real credentials. CI runs PHP 8.1–8.5; local release validation also checks publish/broadcast against Centrifugo 3.1.1 on fresh test channels.
+
+## Real Centrifugo 3 integration test
+
+Set PHPCENT_TEST_API_URL to the test server /api URL and PHPCENT_TEST_CONFIG to a read-only test configuration JSON path, then run composer test:integration.
+The script reads api_key and token_hmac_secret_key only in memory and never prints them. It requires the development Workerman HTTP client and a live Centrifugo 3 server with presence and history enabled.
+
+It verifies real JWT/WebSocket connection, synchronous publish, broadcast reception on two channels, asynchronous publish/callback, presence, API authentication/error propagation and history removal. Every channel and user identifier is freshly randomized; no business users are contacted. Its own message history is cleared.
+
+Centrifugo 3 history without limit returns stream position, not message bodies. The existing history(channel) signature is preserved; the integration test uses an independent explicit-limit query to prove history removal. Successful empty command replies remain stdClass by default or [] with setUseAssoc(true).
+
+The Teamones service-level APISIX/OAuth push regression lives in the IM repository tests/centrifugo_push_integration.php and only targets the authenticated test account.

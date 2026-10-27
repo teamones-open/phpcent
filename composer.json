@@ -28,7 +28,8 @@
         "centrifugal/phpcent": "*"
     },
     "scripts": {
-        "test": "phpunit --configuration phpunit.xml.dist"
+        "test": "phpunit --configuration phpunit.xml.dist",
+        "test:integration": "@php -d error_reporting=30719 integration/centrifugo3.php"
     },
     "suggest": {
         "workerman/http-client": "^3.1 for optional asynchronous requests inside Workerman 5"
